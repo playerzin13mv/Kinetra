@@ -20,7 +20,7 @@ enum class Ic {
     FLIP_H, FLIP_V, FADE, CURVE
 }
 
-class IconDrawable(private val ic: Ic, var tint: Int, private val sizePx: Int) : Drawable() {
+class IconDrawable(private val ic: Ic, private val color: Int, private val sizePx: Int) : Drawable() {
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val rf = RectF()
@@ -47,12 +47,12 @@ class IconDrawable(private val ic: Ic, var tint: Int, private val sizePx: Int) :
         p.strokeWidth = 2f
         p.strokeCap = Paint.Cap.ROUND
         p.strokeJoin = Paint.Join.ROUND
-        p.color = tint
+        p.color = color
     }
 
     private fun fl() {
         p.style = Paint.Style.FILL
-        p.color = tint
+        p.color = color
     }
 
     private fun line(c: Canvas, a: Float, b: Float, x: Float, y: Float) {
