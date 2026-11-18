@@ -69,13 +69,22 @@ class TimelineView(ctx: Context) : View(ctx) {
 
     private fun xOf(ms: Long): Float = width / 2f + (ms - t) * pxPerMs
 
+    private val icons = mapOf(
+        LT.IMAGE to IconDrawable(Ic.IMAGE, 0xFFFFFFFF.toInt(), 1),
+        LT.GIF to IconDrawable(Ic.FILM, 0xFFFFFFFF.toInt(), 1),
+        LT.VIDEO to IconDrawable(Ic.VIDEO, 0xFFFFFFFF.toInt(), 1),
+        LT.AUDIO to IconDrawable(Ic.AUDIO, 0xFFFFFFFF.toInt(), 1),
+        LT.TEXT to IconDrawable(Ic.TEXT, 0xFFFFFFFF.toInt(), 1),
+        LT.SHAPE to IconDrawable(Ic.SHAPE, 0xFFFFFFFF.toInt(), 1)
+    )
+
     private fun colorFor(tp: LT): Int = when (tp) {
-        LT.VIDEO -> 0xFF3D6FE0.toInt()
-        LT.IMAGE -> 0xFF2FA866.toInt()
-        LT.GIF -> 0xFF8E5BE0.toInt()
-        LT.AUDIO -> 0xFF14A8A0.toInt()
-        LT.TEXT -> 0xFFD99A1E.toInt()
-        LT.SHAPE -> 0xFFD6477A.toInt()
+        LT.VIDEO -> 0xFF5B8CFF.toInt()
+        LT.IMAGE -> 0xFF3DDC97.toInt()
+        LT.GIF -> 0xFFB48CFF.toInt()
+        LT.AUDIO -> 0xFF2BD4D4.toInt()
+        LT.TEXT -> 0xFFFFB84D.toInt()
+        LT.SHAPE -> 0xFFFF6B9A.toInt()
     }
 
     private fun fmt(ms: Long, fps: Int): String {
@@ -101,13 +110,13 @@ class TimelineView(ctx: Context) : View(ctx) {
         val pr = project ?: return
         val w = width.toFloat()
         val h = height.toFloat()
-        c.drawColor(C.DARK_PANEL)
+        c.drawColor(C.PANEL)
         val order = pr.layers.asReversed()
 
         c.save()
         c.clipRect(0f, rulerH, w, h)
         if (order.isEmpty()) {
-            textP.color = C.GRAY
+            textP.color = C.MUTED
             textP.textSize = 13 * dn
             textP.textAlign = Paint.Align.CENTER
             c.drawText("Toque em + para adicionar mídia", w / 2, rowsTop + 40 * dn, textP)
@@ -118,27 +127,43 @@ class TimelineView(ctx: Context) : View(ctx) {
             val x1 = xOf(l.start)
             val x2 = xOf(l.end())
             rect.set(x1, top, x2, top + rowH)
+            val base = colorFor(l.type)
             paint.style = Paint.Style.FILL
-            paint.color = colorFor(l.type)
-            paint.alpha = if (l.visible) 255 else 90
-            c.drawRoundRect(rect, 8 * dn, 8 * dn, paint)
-            paint.alpha = 255
+            paint.color = (base and 0x00FFFFFF) or (if (l.visible) 0x55000000 else 0x22000000)
+            c.drawRoundRect(rect, 10 * dn, 10 * dn, paint)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1 * dn
+            paint.color = base
+            c.drawRoundRect(rect, 10 * dn, 10 * dn, paint)
 
             c.save()
             c.clipRect(rect)
+            paint.style = Paint.Style.FILL
+            paint.color = base
+            c.drawRect(x1, top, x1 + 5 * dn, top + rowH, paint)
+            val tx = max(x1, 0f) + 12 * dn
+            val icd = icons[l.type]
+            if (icd != null) {
+                icd.setBounds(
+                    tx.toInt(), (top + rowH / 2 - 8 * dn).toInt(),
+                    (tx + 16 * dn).toInt(), (top + rowH / 2 + 8 * dn).toInt()
+                )
+                icd.draw(c)
+            }
             textP.color = 0xFFFFFFFF.toInt()
             textP.textSize = 12 * dn
             textP.textAlign = Paint.Align.LEFT
             val label = (if (l.name.isNotBlank()) l.name else l.type.name.lowercase())
-            c.drawText(label, max(x1, 0f) + 8 * dn, top + rowH / 2 + 4 * dn, textP)
+            c.drawText(label, tx + 22 * dn, top + rowH / 2 + 4 * dn, textP)
             c.restore()
 
             if (l.id == selectedId) {
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 2 * dn
                 paint.color = 0xFFFFFFFF.toInt()
-                c.drawRoundRect(rect, 8 * dn, 8 * dn, paint)
+                c.drawRoundRect(rect, 10 * dn, 10 * dn, paint)
                 paint.style = Paint.Style.FILL
+                paint.color = C.ACCENT
                 val hw = 7 * dn
                 rect.set(x1, top + 4 * dn, x1 + hw, top + rowH - 4 * dn)
                 c.drawRoundRect(rect, 3 * dn, 3 * dn, paint)
@@ -148,14 +173,14 @@ class TimelineView(ctx: Context) : View(ctx) {
                 for (kt in l.allKeyTimes()) {
                     val kx = xOf(l.start + kt)
                     val on = activeTimes.contains(kt)
-                    diamond(c, kx, top + rowH / 2, if (on) 7 * dn else 5 * dn, if (on) 0xFF00E5B0.toInt() else 0xFFFFFFFF.toInt())
+                    diamond(c, kx, top + rowH / 2, if (on) 7 * dn else 5 * dn, if (on) C.AMBER else 0xFFFFFFFF.toInt())
                 }
             }
         }
         c.restore()
 
         paint.style = Paint.Style.FILL
-        paint.color = C.DARK_PANEL
+        paint.color = C.PANEL
         c.drawRect(0f, 0f, w, rulerH, paint)
         val steps = longArrayOf(100, 250, 500, 1000, 2000, 5000, 10000, 30000, 60000)
         var step = steps.last()
@@ -168,10 +193,10 @@ class TimelineView(ctx: Context) : View(ctx) {
         val tmin = t - (w / 2f / pxPerMs).toLong()
         val tmax = t + (w / 2f / pxPerMs).toLong()
         var tk = (floor(tmin.toDouble() / step).toLong()) * step
-        textP.color = C.GRAY
+        textP.color = C.MUTED
         textP.textSize = 10 * dn
         textP.textAlign = Paint.Align.CENTER
-        paint.color = C.GRAY
+        paint.color = C.MUTED
         paint.strokeWidth = 1f
         while (tk <= tmax) {
             if (tk >= 0) {
@@ -187,7 +212,7 @@ class TimelineView(ctx: Context) : View(ctx) {
         paint.color = 0x66FFFFFF
         c.drawLine(ex, rulerH, ex, h, paint)
 
-        paint.color = 0xFFFFFFFF.toInt()
+        paint.color = C.ACCENT
         paint.strokeWidth = 2 * dn
         c.drawLine(w / 2, 0f, w / 2, h, paint)
         val lbl = fmt(t, pr.fps)
@@ -196,9 +221,9 @@ class TimelineView(ctx: Context) : View(ctx) {
         val tw = textP.measureText(lbl) + 16 * dn
         rect.set(w / 2 - tw / 2, 2 * dn, w / 2 + tw / 2, 22 * dn)
         paint.style = Paint.Style.FILL
-        paint.color = C.DARK_PANEL2
+        paint.color = C.RAISED
         c.drawRoundRect(rect, 6 * dn, 6 * dn, paint)
-        textP.color = 0xFFFFFFFF.toInt()
+        textP.color = C.ACCENT
         c.drawText(lbl, w / 2, 17 * dn, textP)
     }
 

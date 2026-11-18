@@ -42,7 +42,7 @@ class AudioPreview(var project: Project, private val ctx: Context) {
                     mp.seekTo((t - l.start + l.trimIn).toInt())
                     mp.start()
                 }
-                val v = l.value(Props.VOL, t - l.start).coerceIn(0f, 1f)
+                val v = (l.value(Props.VOL, t - l.start) * l.fadeFactor(t - l.start)).coerceIn(0f, 1f)
                 mp.setVolume(v, v)
             } else if (mp != null) {
                 try {
@@ -161,7 +161,7 @@ object AudioMixer {
                 if (of >= frames) break
                 val srcPos = trimFrames + i.toLong() * pcm.sr / SR
                 if (srcPos >= srcFrames) break
-                if (i % 441 == 0) vol = l.value(Props.VOL, i * 1000L / SR)
+                if (i % 441 == 0) vol = l.value(Props.VOL, i * 1000L / SR) * l.fadeFactor(i * 1000L / SR)
                 val si = srcPos.toInt() * pcm.ch
                 val left = pcm.data[si].toFloat()
                 val right = if (pcm.ch > 1) pcm.data[si + 1].toFloat() else left

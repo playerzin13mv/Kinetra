@@ -25,7 +25,8 @@ object Props {
     const val CONTRAST = "contrast"
     const val SAT = "sat"
     const val VOL = "vol"
-    val all = listOf(X, Y, SCALE, ROT, ALPHA, BRIGHT, CONTRAST, SAT, VOL)
+    const val CORNER = "corner"
+    val all = listOf(X, Y, SCALE, ROT, ALPHA, CORNER, BRIGHT, CONTRAST, SAT, VOL)
 
     fun label(p: String): String = when (p) {
         X -> "Posição X"
@@ -37,6 +38,7 @@ object Props {
         CONTRAST -> "Contraste"
         SAT -> "Saturação"
         VOL -> "Volume"
+        CORNER -> "Cantos"
         else -> p
     }
 
@@ -44,6 +46,11 @@ object Props {
         SCALE, ALPHA, CONTRAST, SAT, VOL -> 1f
         else -> 0f
     }
+}
+
+object Fonts {
+    val families = listOf("sans-serif", "serif", "monospace", "sans-serif-condensed", "cursive", "casual")
+    val names = listOf("Padrão", "Serifada", "Monoespaçada", "Condensada", "Cursiva", "Casual")
 }
 
 object Ease {
@@ -81,10 +88,24 @@ class Layer(val id: String = UUID.randomUUID().toString()) {
     var h = 400f
     var blend = "normal"
     var visible = true
+    var flipH = false
+    var flipV = false
+    var fadeIn = 0L
+    var fadeOut = 0L
+    var font = 0
+    var strokeW = 0f
+    var strokeColor = -16777216
     val base = HashMap<String, Float>()
     val tracks = HashMap<String, MutableList<Keyframe>>()
 
     fun end(): Long = start + duration
+
+    fun fadeFactor(lt: Long): Float {
+        var f = 1f
+        if (fadeIn > 0 && lt < fadeIn) f = lt.toFloat() / fadeIn
+        if (fadeOut > 0 && lt > duration - fadeOut) f = minOf(f, (duration - lt).toFloat() / fadeOut)
+        return f.coerceIn(0f, 1f)
+    }
 
     fun value(p: String, t: Long): Float {
         val ks = tracks[p]
@@ -163,6 +184,13 @@ class Layer(val id: String = UUID.randomUUID().toString()) {
         o.put("h", h.toDouble())
         o.put("blend", blend)
         o.put("visible", visible)
+        o.put("flipH", flipH)
+        o.put("flipV", flipV)
+        o.put("fadeIn", fadeIn)
+        o.put("fadeOut", fadeOut)
+        o.put("font", font)
+        o.put("strokeW", strokeW.toDouble())
+        o.put("strokeColor", strokeColor)
         val b = JSONObject()
         for ((k, v) in base) b.put(k, v.toDouble())
         o.put("base", b)
@@ -209,6 +237,13 @@ class Layer(val id: String = UUID.randomUUID().toString()) {
             l.h = o.optDouble("h", 400.0).toFloat()
             l.blend = o.optString("blend", "normal")
             l.visible = o.optBoolean("visible", true)
+            l.flipH = o.optBoolean("flipH", false)
+            l.flipV = o.optBoolean("flipV", false)
+            l.fadeIn = o.optLong("fadeIn", 0L)
+            l.fadeOut = o.optLong("fadeOut", 0L)
+            l.font = o.optInt("font", 0)
+            l.strokeW = o.optDouble("strokeW", 0.0).toFloat()
+            l.strokeColor = o.optInt("strokeColor", -16777216)
             val b = o.optJSONObject("base")
             if (b != null) {
                 for (k in b.keys()) l.base[k] = b.getDouble(k).toFloat()
@@ -382,7 +417,7 @@ object Store {
             val h = max(2, w * p.height / p.width)
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val c = Canvas(bmp)
-            c.drawColor(0xFFCFD3DA.toInt())
+            c.drawColor(0xFF1B1F31.toInt())
             val r = Renderer(ctx, p, true)
             c.scale(w / p.width.toFloat(), h / p.height.toFloat())
             val t0 = p.layers.minOfOrNull { it.start } ?: 0L

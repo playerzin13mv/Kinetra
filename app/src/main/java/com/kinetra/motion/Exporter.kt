@@ -177,6 +177,62 @@ object Exporter {
         return uri
     }
 
+    fun exportGif(
+        ctx: Context,
+        project: Project,
+        shortSide: Int,
+        fps: Int,
+        progress: (Float) -> Unit,
+        cancel: AtomicBoolean
+    ): Uri? {
+        val d = dims(project, min(shortSide, 480))
+        val w = d[0]
+        val h = d[1]
+        val total = project.totalDuration()
+        val frames = max(1, (total * fps / 1000L).toInt())
+        val values = ContentValues()
+        values.put(MediaStore.Images.Media.DISPLAY_NAME, "${safeName(project.name)}_${System.currentTimeMillis()}.gif")
+        values.put(MediaStore.Images.Media.MIME_TYPE, "image/gif")
+        values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Kinetra")
+        values.put(MediaStore.Images.Media.IS_PENDING, 1)
+        val uri = ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+        val renderer = Renderer(ctx, project, true)
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val px = IntArray(w * h)
+        var ok = false
+        try {
+            ctx.contentResolver.openOutputStream(uri)!!.buffered().use { os ->
+                val enc = GifEncoder(os, w, h, max(2, 100 / fps))
+                for (i in 0 until frames) {
+                    if (cancel.get()) break
+                    c.drawColor(Color.BLACK)
+                    c.save()
+                    c.scale(w / project.width.toFloat(), h / project.height.toFloat())
+                    renderer.renderScene(c, i * 1000L / fps)
+                    c.restore()
+                    bmp.getPixels(px, 0, w, 0, 0, w, h)
+                    enc.addFrame(px)
+                    progress((i + 1f) / frames)
+                }
+                if (!cancel.get()) {
+                    enc.finish()
+                    ok = true
+                }
+            }
+        } finally {
+            renderer.release()
+        }
+        if (!ok) {
+            ctx.contentResolver.delete(uri, null, null)
+            return null
+        }
+        values.clear()
+        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+        ctx.contentResolver.update(uri, values, null, null)
+        return uri
+    }
+
     fun exportStill(ctx: Context, project: Project, t: Long, shortSide: Int): Uri? {
         val d = dims(project, shortSide)
         val bmp = Bitmap.createBitmap(d[0], d[1], Bitmap.Config.ARGB_8888)

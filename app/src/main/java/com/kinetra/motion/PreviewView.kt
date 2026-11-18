@@ -60,7 +60,7 @@ class PreviewView(ctx: Context) : View(ctx) {
     override fun onDraw(c: Canvas) {
         val p = project ?: return
         val r = renderer ?: return
-        c.drawColor(C.DARK_BG)
+        c.drawColor(C.BG)
         val pad = 12 * resources.displayMetrics.density
         vs = min((width - 2 * pad) / p.width, (height - 2 * pad) / p.height)
         ox = (width - p.width * vs) / 2f

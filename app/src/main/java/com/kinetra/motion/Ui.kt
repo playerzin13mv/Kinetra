@@ -15,14 +15,16 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 object C {
-    val ACCENT = 0xFF00E5B0.toInt()
-    val NAVY = 0xFF1A1D2E.toInt()
-    val DARK_BG = 0xFF11131D.toInt()
-    val DARK_PANEL = 0xFF1A1D2B.toInt()
-    val DARK_PANEL2 = 0xFF262A3B.toInt()
-    val LIGHT_BG = 0xFFF4F5F7.toInt()
-    val TEXT_DARK = 0xFF1E2235.toInt()
-    val GRAY = 0xFF9AA0AE.toInt()
+    val BG = 0xFF0D0F16.toInt()
+    val PANEL = 0xFF161923.toInt()
+    val RAISED = 0xFF20243A.toInt()
+    val STROKE = 0xFF2C3150.toInt()
+    val ACCENT = 0xFF4DF5C6.toInt()
+    val VIOLET = 0xFF9B7BFF.toInt()
+    val AMBER = 0xFFFFC857.toInt()
+    val TEXT = 0xFFEAECF5.toInt()
+    val MUTED = 0xFF8A90A8.toInt()
+    val DANGER = 0xFFFF6B6B.toInt()
 }
 
 const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
@@ -41,7 +43,7 @@ fun rounded(color: Int, radius: Float, stroke: Int = 0, strokeW: Int = 0): Gradi
     return g
 }
 
-fun Context.tv(text: String, sp: Float = 14f, color: Int = Color.WHITE, bold: Boolean = false): TextView {
+fun Context.tv(text: String, sp: Float = 14f, color: Int = C.TEXT, bold: Boolean = false): TextView {
     val t = TextView(this)
     t.text = text
     t.textSize = sp
@@ -50,39 +52,61 @@ fun Context.tv(text: String, sp: Float = 14f, color: Int = Color.WHITE, bold: Bo
     return t
 }
 
-fun Context.chip(text: String, selected: Boolean): TextView {
-    val t = tv(text, 13f, if (selected) C.NAVY else Color.WHITE, true)
+fun Context.chip(text: String, selected: Boolean, ic: Ic? = null): TextView {
+    val fg = if (selected) C.BG else C.TEXT
+    val t = tv(text, 13f, fg, true)
     t.gravity = Gravity.CENTER
-    t.setPadding(dp(14), dp(8), dp(14), dp(8))
-    t.background = rounded(if (selected) C.ACCENT else C.DARK_PANEL2, dpf(18f))
-    return t
-}
-
-fun Context.iconBtn(glyph: String, sizeSp: Float = 20f, onClick: () -> Unit): TextView {
-    val t = tv(glyph, sizeSp, Color.WHITE, false)
-    t.gravity = Gravity.CENTER
-    t.setOnClickListener { onClick() }
-    return t
-}
-
-fun Context.dropdown(options: List<String>, sel: Int, light: Boolean, onSel: (Int) -> Unit): TextView {
-    val t = tv("", 15f, if (light) C.TEXT_DARK else Color.WHITE, true)
-    var cur = sel
-    fun upd() {
-        t.text = options[cur] + "  ▾"
+    t.setPadding(dp(if (ic != null) 10 else 14), dp(8), dp(14), dp(8))
+    t.background = rounded(
+        if (selected) C.ACCENT else C.RAISED, dpf(18f),
+        if (selected) C.ACCENT else C.STROKE, dp(1)
+    )
+    if (ic != null) {
+        t.setCompoundDrawablesRelativeWithIntrinsicBounds(IconDrawable(ic, fg, dp(16)), null, null, null)
+        t.compoundDrawablePadding = dp(6)
     }
-    upd()
-    t.setPadding(dp(14), dp(12), dp(14), dp(12))
-    t.background = rounded(if (light) Color.WHITE else C.DARK_PANEL2, dpf(12f))
-    t.setOnClickListener {
+    return t
+}
+
+fun Context.iconBtn(ic: Ic, tint: Int = C.TEXT, iconDp: Int = 22, onClick: () -> Unit): IconView {
+    val v = IconView(this, ic, tint, iconDp)
+    v.setOnClickListener { onClick() }
+    return v
+}
+
+fun Context.gradientButton(text: String, ic: Ic?): LinearLayout {
+    val row = LinearLayout(this)
+    row.gravity = Gravity.CENTER
+    row.setPadding(dp(22), dp(14), dp(26), dp(14))
+    val g = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(C.ACCENT, C.VIOLET))
+    g.cornerRadius = dpf(30f)
+    row.background = g
+    row.elevation = dpf(8f)
+    if (ic != null) row.addView(IconView(this, ic, C.BG, 20), lp(dp(24), dp(24)))
+    val t = tv(text, 15f, C.BG, true)
+    t.setPadding(dp(8), 0, 0, 0)
+    row.addView(t, lp(WRAP, WRAP))
+    return row
+}
+
+fun Context.dropdown(options: List<String>, sel: Int, onSel: (Int) -> Unit): LinearLayout {
+    var cur = sel.coerceIn(0, options.size - 1)
+    val row = LinearLayout(this)
+    row.gravity = Gravity.CENTER_VERTICAL
+    row.setPadding(dp(14), dp(11), dp(10), dp(11))
+    row.background = rounded(C.RAISED, dpf(12f), C.STROKE, dp(1))
+    val t = tv(options[cur], 14f, C.TEXT, true)
+    row.addView(t, lp(0, WRAP, 1f))
+    row.addView(IconView(this, Ic.CHEVRON, C.MUTED, 18), lp(dp(22), dp(22)))
+    row.setOnClickListener {
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setItems(options.toTypedArray()) { _, i ->
                 cur = i
-                upd()
+                t.text = options[i]
                 onSel(i)
             }.show()
     }
-    return t
+    return row
 }
 
 fun Context.askText(title: String, initial: String, multiline: Boolean, onOk: (String) -> Unit) {
@@ -108,8 +132,8 @@ fun Context.askText(title: String, initial: String, multiline: Boolean, onOk: (S
 fun Context.pickColor(onPick: (Int) -> Unit) {
     val palette = intArrayOf(
         0xFFFFFFFF.toInt(), 0xFF000000.toInt(), 0xFFFF3B30.toInt(), 0xFFFF9500.toInt(), 0xFFFFD60A.toInt(),
-        0xFF34C759.toInt(), 0xFF00E5B0.toInt(), 0xFF30B0C7.toInt(), 0xFF0A84FF.toInt(), 0xFF5E5CE6.toInt(),
-        0xFFBF5AF2.toInt(), 0xFFFF2D55.toInt(), 0xFF8E8E93.toInt(), 0xFF7B4A2D.toInt(), 0xFFFFC0CB.toInt()
+        0xFF34C759.toInt(), 0xFF4DF5C6.toInt(), 0xFF30B0C7.toInt(), 0xFF0A84FF.toInt(), 0xFF5E5CE6.toInt(),
+        0xFF9B7BFF.toInt(), 0xFFFF2D55.toInt(), 0xFF8E8E93.toInt(), 0xFF7B4A2D.toInt(), 0xFFFFC0CB.toInt()
     )
     val box = LinearLayout(this)
     box.orientation = LinearLayout.VERTICAL
@@ -119,7 +143,7 @@ fun Context.pickColor(onPick: (Int) -> Unit) {
     val hex = EditText(this)
     hex.hint = "#RRGGBB"
     hex.setTextColor(Color.WHITE)
-    hex.setHintTextColor(C.GRAY)
+    hex.setHintTextColor(C.MUTED)
     hex.setSingleLine()
     val dlg = AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
         .setTitle("Cor")
@@ -159,7 +183,7 @@ object Opts {
     val BG_COLORS = listOf(0, 0xFF000000.toInt(), 0xFFFFFFFF.toInt(), 0xFF808080.toInt())
     val IMG_DUR = listOf(1, 2, 3, 5, 10)
     val IMG_DUR_NAMES = listOf("1 segundo", "2 segundos", "3 segundos", "5 segundos", "10 segundos")
-    val EXP_FMT = listOf("MP4 (H.264)", "MP4 (HEVC)", "Imagem PNG (quadro atual)")
+    val EXP_FMT = listOf("MP4 (H.264)", "MP4 (HEVC)", "GIF animado", "Imagem PNG (quadro atual)")
     val EXP_FPS = listOf(24, 30, 60)
     val EXP_FPS_NAMES = listOf("24 fps", "30 fps", "60 fps")
     val QUALITY_NAMES = listOf("Baixa", "Média", "Alta", "Máxima")

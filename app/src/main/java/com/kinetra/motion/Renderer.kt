@@ -18,6 +18,8 @@ import android.media.MediaMetadataRetriever
 import java.io.File
 import java.io.FileInputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -38,81 +40,102 @@ class Renderer(private val ctx: Context, var project: Project, private val expor
     private val dst = RectF()
 
     private inner class VideoSource(path: String) {
-        val mmr = MediaMetadataRetriever()
+        private var dec: VideoDecoder? = null
+        private var mmr: MediaMetadataRetriever? = null
         var w = 1
         var h = 1
-        private val cache = object : LinkedHashMap<Long, Bitmap>(16, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Bitmap>?): Boolean = size > 10
-        }
+        var rot = 0
+        private var step = 1
+        private var maxSide = 640
         @Volatile
         var last: Bitmap? = null
-        private val pending = HashSet<Long>()
+        private val want = AtomicLong(-1L)
+        private val busy = AtomicBoolean(false)
 
         init {
-            mmr.setDataSource(path)
-            val vw = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 1
-            val vh = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 1
-            val rot = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-            if (rot == 90 || rot == 270) {
-                w = vh
-                h = vw
-            } else {
-                w = vw
-                h = vh
+            maxSide = if (export) max(project.width, project.height) else 640
+            try {
+                val d = VideoDecoder(path)
+                dec = d
+                w = d.dispW
+                h = d.dispH
+                rot = d.rotation
+                step = max(1, max(d.rawW, d.rawH) / maxSide)
+            } catch (e: Throwable) {
+                dec = null
+                val m = MediaMetadataRetriever()
+                m.setDataSource(path)
+                mmr = m
+                val vw = m.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 1
+                val vh = m.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 1
+                val r = m.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                if (r == 90 || r == 270) {
+                    w = vh
+                    h = vw
+                } else {
+                    w = vw
+                    h = vh
+                }
+                rot = 0
             }
         }
 
-        private fun decode(ms: Long): Bitmap? {
-            val maxSide = if (export) max(project.width, project.height) else 720
+        private fun fetch(ms: Long): Bitmap? {
+            val d = dec
+            if (d != null) return d.frameAt(ms, step)
+            val m = mmr ?: return null
             val sc = min(1f, maxSide.toFloat() / max(w, h))
             val tw = max(2, (w * sc).toInt())
             val th = max(2, (h * sc).toInt())
             return try {
-                mmr.getScaledFrameAtTime(ms * 1000L, MediaMetadataRetriever.OPTION_CLOSEST, tw, th)
+                m.getScaledFrameAtTime(ms * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, tw, th)
             } catch (e: Throwable) {
                 null
             }
         }
 
-        fun frame(ms: Long): Bitmap? {
-            val key = if (export) ms else (ms / 66L) * 66L
-            synchronized(cache) {
-                val c = cache[key]
-                if (c != null) {
-                    last = c
-                    return c
-                }
-            }
-            if (export) {
-                val b = decode(key)
-                if (b != null) {
-                    synchronized(cache) { cache[key] = b }
-                    last = b
-                }
-                return b ?: last
-            }
-            synchronized(pending) {
-                if (!pending.add(key)) return last
-            }
+        private fun pump() {
+            if (!busy.compareAndSet(false, true)) return
             try {
                 exec.execute {
-                    val b = decode(key)
-                    if (b != null) {
-                        synchronized(cache) { cache[key] = b }
-                        last = b
+                    try {
+                        while (true) {
+                            val t = want.getAndSet(-1L)
+                            if (t < 0) break
+                            val b = fetch(t)
+                            if (b != null) last = b
+                            onAsyncFrame?.invoke()
+                        }
+                    } catch (e: Throwable) {
+                    } finally {
+                        busy.set(false)
+                        if (want.get() >= 0) pump()
                     }
-                    synchronized(pending) { pending.remove(key) }
-                    onAsyncFrame?.invoke()
                 }
             } catch (e: Exception) {
+                busy.set(false)
             }
+        }
+
+        fun frame(ms: Long): Bitmap? {
+            if (export) {
+                val b = fetch(ms)
+                if (b != null) last = b
+                return b ?: last
+            }
+            want.set(ms)
+            pump()
             return last
         }
 
         fun release() {
             try {
-                mmr.release()
-            } catch (e: Exception) {
+                dec?.release()
+            } catch (e: Throwable) {
+            }
+            try {
+                mmr?.release()
+            } catch (e: Throwable) {
             }
         }
     }
@@ -158,12 +181,17 @@ class Renderer(private val ctx: Context, var project: Project, private val expor
         return videos[l.id]
     }
 
-    private fun textMetrics(l: Layer): FloatArray {
-        val size = project.height * 0.08f
+    private fun setupText(l: Layer) {
         textPaint.reset()
         textPaint.isAntiAlias = true
-        textPaint.textSize = size
-        textPaint.typeface = Typeface.DEFAULT_BOLD
+        textPaint.textSize = project.height * 0.08f
+        textPaint.typeface = Typeface.create(Fonts.families[l.font.coerceIn(0, Fonts.families.size - 1)], Typeface.BOLD)
+        textPaint.textAlign = Paint.Align.CENTER
+    }
+
+    private fun textMetrics(l: Layer): FloatArray {
+        setupText(l)
+        val size = textPaint.textSize
         val lines = l.text.split("\n")
         var w = 10f
         for (ln in lines) w = max(w, textPaint.measureText(ln))
@@ -241,7 +269,7 @@ class Renderer(private val ctx: Context, var project: Project, private val expor
 
     private fun drawLayer(canvas: Canvas, l: Layer, t: Long) {
         val lt = t - l.start
-        val a = l.value(Props.ALPHA, lt).coerceIn(0f, 1f)
+        val a = (l.value(Props.ALPHA, lt) * l.fadeFactor(lt)).coerceIn(0f, 1f)
         if (a <= 0f) return
         val sc = l.value(Props.SCALE, lt)
         if (sc <= 0f) return
@@ -257,6 +285,15 @@ class Renderer(private val ctx: Context, var project: Project, private val expor
         canvas.translate(l.value(Props.X, lt), l.value(Props.Y, lt))
         canvas.rotate(l.value(Props.ROT, lt))
         canvas.scale(sc, sc)
+        if (l.flipH || l.flipV) canvas.scale(if (l.flipH) -1f else 1f, if (l.flipV) -1f else 1f)
+        val media = l.type == LT.IMAGE || l.type == LT.GIF || l.type == LT.VIDEO
+        val cr = if (media) l.value(Props.CORNER, lt) else 0f
+        if (cr > 0f) {
+            val rr = min(s[0], s[1]) * cr
+            path.reset()
+            path.addRoundRect(-s[0] / 2, -s[1] / 2, s[0] / 2, s[1] / 2, rr, rr, Path.Direction.CW)
+            canvas.clipPath(path)
+        }
         when (l.type) {
             LT.IMAGE -> {
                 val b = bmp(l)
@@ -279,26 +316,40 @@ class Renderer(private val ctx: Context, var project: Project, private val expor
                 }
             }
             LT.VIDEO -> {
-                val b = video(l)?.frame(lt + l.trimIn)
-                if (b != null) {
+                val vs = video(l)
+                val b = vs?.frame(lt + l.trimIn)
+                if (vs != null && b != null) {
                     paint.alpha = (a * 255).toInt()
-                    dst.set(-s[0] / 2, -s[1] / 2, s[0] / 2, s[1] / 2)
+                    canvas.save()
+                    canvas.rotate(vs.rot.toFloat())
+                    val swap = vs.rot == 90 || vs.rot == 270
+                    val dw = if (swap) s[1] else s[0]
+                    val dh = if (swap) s[0] else s[1]
+                    dst.set(-dw / 2, -dh / 2, dw / 2, dh / 2)
                     canvas.drawBitmap(b, null, dst, paint)
+                    canvas.restore()
                 }
             }
             LT.TEXT -> {
-                val size = project.height * 0.08f
-                textPaint.reset()
-                textPaint.isAntiAlias = true
-                textPaint.textSize = size
-                textPaint.typeface = Typeface.DEFAULT_BOLD
-                textPaint.textAlign = Paint.Align.CENTER
-                textPaint.color = l.color
-                textPaint.alpha = (Color.alpha(l.color) * a).toInt()
+                setupText(l)
+                val size = textPaint.textSize
                 textPaint.colorFilter = cf
                 textPaint.xfermode = paint.xfermode
                 val lh = size * 1.25f
                 val lines = l.text.split("\n")
+                if (l.strokeW > 0f) {
+                    textPaint.style = Paint.Style.STROKE
+                    textPaint.strokeWidth = size * l.strokeW
+                    textPaint.strokeJoin = Paint.Join.ROUND
+                    textPaint.color = l.strokeColor
+                    textPaint.alpha = (Color.alpha(l.strokeColor) * a).toInt()
+                    for ((i, ln) in lines.withIndex()) {
+                        canvas.drawText(ln, 0f, -s[1] / 2 + lh * i + lh * 0.82f, textPaint)
+                    }
+                }
+                textPaint.style = Paint.Style.FILL
+                textPaint.color = l.color
+                textPaint.alpha = (Color.alpha(l.color) * a).toInt()
                 for ((i, ln) in lines.withIndex()) {
                     canvas.drawText(ln, 0f, -s[1] / 2 + lh * i + lh * 0.82f, textPaint)
                 }
@@ -360,7 +411,7 @@ class Renderer(private val ctx: Context, var project: Project, private val expor
         resetPaint()
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2.5f * k
-        paint.color = 0xFF00E5B0.toInt()
+        paint.color = 0xFF4DF5C6.toInt()
         canvas.drawRect(-s[0] / 2, -s[1] / 2, s[0] / 2, s[1] / 2, paint)
         paint.style = Paint.Style.FILL
         val r = 6f * k
@@ -389,13 +440,13 @@ class Renderer(private val ctx: Context, var project: Project, private val expor
     }
 
     fun release() {
-        for (v in videos.values) v?.release()
-        videos.clear()
-        bitmaps.clear()
-        movies.clear()
         try {
             exec.shutdownNow()
         } catch (e: Exception) {
         }
+        for (v in videos.values) v?.release()
+        videos.clear()
+        bitmaps.clear()
+        movies.clear()
     }
 }
